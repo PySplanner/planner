@@ -1,226 +1,362 @@
-"use client";
+"use client"
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { WaypointsIcon, CodeIcon, ArrowRightIcon, XIcon, GripVerticalIcon, PlusIcon, ChevronLeftIcon, ChevronRightIcon } from "lucide-react"
+import { useState, useRef, useCallback, useEffect } from "react"
+import { ReactSortable } from "react-sortablejs";
+import { Button } from "@/components/ui/button"
+import { toast } from "sonner"
 
-import { GithubSVG, DiscordSVG, YoutubeSVG } from "@/components/media-icons";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-
-import TypeIt from "typeit-react";
-import { ArrowDown, Mail } from "lucide-react";
-
-interface TutorialProps {
-  name: string;
-  description: string;
-  image?: string;
-  docs_link: string;
-}
-const tutorials: TutorialProps[] = [
-  {
-    name: "Getting Started",
-    description: "Learn the basics of PySplanner and how to get started with your robot.",
-    docs_link: "/docs/"
-  },
-  {
-    name: "Advanced Features",
-    description: "Explore the advanced capabilities of PySplanner for complex robot movements.",
-    docs_link: "/docs/"
-  },
-  {
-    name: "Behind the scenes",
-    description: "Dive into the technical details of how PySplanner works.",
-    docs_link: "/docs/"
-  },
-  {
-    name: "Tutorial 4",
-    description: "This is a placeholder for a future tutorial.",
-    docs_link: "/docs/"
-  },
-  {
-    name: "Tutorial 5",
-    description: "This is a placeholder for a future tutorial.",
-    docs_link: "/docs/"
-  }
-];
-function OpenTutorial() {
-  return null; // TODO: Add this once the docs are made
+interface PathPoint {
+    id: string;
+    name: string;
+    x: number;
+    y: number;
+    heading: number;
 }
 
-interface ReleaseProps {
-  product: string;
-  description: string;
-  version: string;
-  date: string;
-  github_link: string;
+interface ActionPoint {
+    id: string;
+    name: string;
+    t: number;
+    action: string;
 }
-const releases: ReleaseProps[] = [
-  {
-    product: "Main",
-    description: "The core PySplanner Python code that runs on the robot and interfaces with the firmware.",
-    version: "v0.0.0a",
-    date: "2026-05-10",
-    github_link: "https://github.com/PySplanner/main"
-  },
-  {
-    product: "Firmware",
-    description: "A fork of the PyBricks firmware that implements PySplanner algorithms and features.",
-    version: "v0.2.0a",
-    date: "2026-05-10",
-    github_link: "https://github.com/PySplanner/firmware"
-  },
-  {
-    product: "Dashboard",
-    description: "The web-based dashboard for managing a robot, visualizing movements, and configuring settings.",
-    version: "v0.0.0a",
-    date: "2026-05-10",
-    github_link: "https://github.com/PySplanner/site"
-  },
-  {
-    product: "Visualizer",
-    description: "A web-based tool for creating splans that the robot will follow.",
-    version: "v0.0.0a",
-    date: "2026-05-10",
-    github_link: "https://github.com/PySplanner/site"
-  }
-];
 
-interface SocialProps {
-  name: string;
-  icon: React.ReactNode;
-  link: string;
+interface Splan {
+    id: string;
+    name: string;
+    pathPoints: PathPoint[];
+    actionPoints: ActionPoint[];
 }
-const socialLinks: SocialProps[] = [
-  {
-    name: "GitHub",
-    icon: <GithubSVG className="size-8"/>,
-    link: "https://github.com/PySplanner"
-  },
-  {
-    name: "Discord",
-    icon: <DiscordSVG className="size-8"/>,
-    link: "https://discord.gg/peMVWcuzdJ"
-  },
-  {
-    name: "YouTube",
-    icon: <YoutubeSVG className="size-8"/>,
-    link: "https://www.youtube.com/@pysplanner"
-  },
-  {
-    name: "Email",
-    icon: <Mail className="size-8" />,
-    link: "mailto:contact@pysplanner.com"
-  }
-];
 
-export default function Home() {
-  const router = useRouter();
-  const [isScrollIndicatorVisible, setScrollIndicator] = useState(true);
+export default function Visualizer() {
+    const [splans, setSplans] = useState<Splan[]>([]);
+    
+    const [selectedSplanId, setSelectedSplanId] = useState("0"); // TODO: Make this -1 when hardcodes are removed
+    const [selectedPointId, setSelectedPointId] = useState("-1");
+    const [selectedActionId, setSelectedActionId] = useState("-1");
+    const [hoveredPointId, setHoveredPointId] = useState("-1");
+    const [hoveredActionId, setHoveredActionId] = useState("-1");
 
-  useEffect(() => {
-    const handleScroll = (e: Event) => {
-      const target = e.target as HTMLElement;
-      setScrollIndicator(target.scrollTop < 50);
+    const wrapRef = useRef<HTMLDivElement>(null);
+    const trackRef = useRef<HTMLDivElement>(null);
+    const [showLeft, setShowLeft] = useState(false);
+    const [showRight, setShowRight] = useState(false);
+
+    const [zoom, setZoom] = useState(1);
+    const [pan, setPan] = useState({ x: 0, y: 0 });
+    const [isDragging, setIsDragging] = useState(false);
+    const dragStartRef = useRef({ x: 0, y: 0 });
+    const fieldContainerRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        createSplan(); // Create an initial splan on mount
+    }, []);
+
+    const updateArrows = useCallback(() => {
+        if (!trackRef.current) return;
+
+        const { scrollLeft, scrollWidth, clientWidth } = trackRef.current;
+        const maxScroll = scrollWidth - clientWidth;
+        const needsScroll = maxScroll > 2;
+
+        setShowLeft(needsScroll && scrollLeft > 2);
+        setShowRight(needsScroll && scrollLeft < maxScroll - 2);
+    }, []);
+
+    useEffect(() => {
+        const wrap = wrapRef.current;
+        const track = trackRef.current;
+        if (!wrap || !track) return;
+
+        const handleWheel = (e: WheelEvent) => {
+            if (track.scrollWidth > track.clientWidth) {
+                e.preventDefault();
+                track.scrollLeft += (e.deltaY !== 0 ? e.deltaY : e.deltaX);
+                updateArrows();
+            }
+        };
+
+        wrap.addEventListener('wheel', handleWheel, { passive: false }); // passive: false to allow preventDefault
+        track.addEventListener('scroll', updateArrows);
+        window.addEventListener('resize', updateArrows);
+
+        setTimeout(updateArrows, 50);
+
+        return () => {
+            wrap.removeEventListener('wheel', handleWheel);
+            track.removeEventListener('scroll', updateArrows);
+            window.removeEventListener('resize', updateArrows);
+        };
+    }, [updateArrows, splans.length]); 
+
+    const scrollLeft = () => trackRef.current?.scrollBy({ left: -160, behavior: 'smooth' });
+    const scrollRight = () => trackRef.current?.scrollBy({ left: 160, behavior: 'smooth' });
+
+    const handleFieldZoom = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+        e.preventDefault();
+
+        setZoom((prevZoom) => {
+            const zoomFactor = -e.deltaY * 0.001;
+            const nextZoom = Math.min(Math.max(prevZoom + zoomFactor, 0.5), 4);
+
+            // Re-clamp existing pan position to fit the new zoom level
+            setPan((prevPan) => clampPan(prevPan, nextZoom));
+
+            return nextZoom;
+        });
+    }, []);
+
+    const clampPan = useCallback((newPan: { x: number; y: number }, currentZoom: number) => {
+        if (!fieldContainerRef.current) return newPan;
+
+        const { clientWidth, clientHeight } = fieldContainerRef.current;
+
+        // Calculate maximum distance the image can travel in either direction
+        // When zoom <= 1, pan is restricted to the padding allowance
+        const maxPanX = Math.max(0, (clientWidth * (currentZoom - 1)) / 2) + (currentZoom > 1 ? 200 : 0);
+        const maxPanY = Math.max(0, (clientHeight * (currentZoom - 1)) / 2) + (currentZoom > 1 ? 200 : 0);
+
+        return {
+            x: Math.min(Math.max(newPan.x, -maxPanX), maxPanX),
+            y: Math.min(Math.max(newPan.y, -maxPanY), maxPanY),
+        };
+    }, []);
+
+    const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+        if (e.button !== 0) return; // Only trigger on left-click (button 0)
+        
+        setIsDragging(true);
+        dragStartRef.current = {
+            x: e.clientX - pan.x,
+            y: e.clientY - pan.y,
+        };
     };
 
-    window.addEventListener('scroll', handleScroll, true);
-    return () => window.removeEventListener('scroll', handleScroll, true);
-  }, []);
-  
-  return (
-    <div className="relative flex flex-col w-full items-center">
-        <div className="relative flex flex-col w-full items-center min-h-[calc(100vh-64px)] pb-4">
-            <div className="absolute top-0 left-0 right-0 h-[60vh] bg-linear-to-b from-primary/11 dark:from-primary/6 to-transparent pointer-events-none" />
+    const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+        if (!isDragging) return;
 
-            <img className="rounded-md mt-12 mb-12 h-50" src="./banner.svg" alt="PySplanner Logo" />
-            <div className="w-3/8 text-center">
-                <TypedHeading />
-                <p className="text-lg text-muted-foreground mt-4">
-                  PySplanner is a powerful, free, and open source tool for optimized autonomous movement on LEGO MINDSTORMS EV3 and SPIKE Prime robots.
-                  Creating smooth and consistent movements for your robot has never been easier. Say goodbye to guesswork and hello to precision with PySplanner.
-                </p>
-            </div>
+        const unclampedPan = {
+            x: e.clientX - dragStartRef.current.x,
+            y: e.clientY - dragStartRef.current.y,
+        };
 
-              <div className="flex items-center gap-4 mt-8">
-                <Button className="text-white" size="lg" onClick={() => router.push('/docs')}>Get Started</Button>
-                <Button variant="outline" size="lg" onClick={() => router.push('/dashboard')}>Go To Dashboard</Button>
-            </div>
+        setPan(clampPan(unclampedPan, zoom));
+    };
 
-            <div className={`absolute bottom-24 flex flex-col items-center gap-1 text-muted-foreground text-sm transition-opacity duration-300 ${isScrollIndicatorVisible ? 'opacity-100' : 'opacity-0'}`}>
-                <ArrowDown />
-                View More
-            </div>
-        </div>
+    const handleMouseUp = () => {
+        setIsDragging(false);
+    };
 
-        <div className="flex flex-col w-full max-w-4xl">
-            <Card className="w-full p-6">
-                <h3 className="text-2xl font-bold text-primary">Tutorials</h3>
-                <div className="flex flex-row space-x-3 overflow-x-auto p-1 pb-4">
-                  {tutorials.map((tutorial, index) => (
-                    <Card key={index} className="flex flex-col w-90 gap-4 pb-4 shrink-0 hover:shadow-xl hover:ring-primary transition-all cursor-pointer">
-                      <img src={tutorial.image || "./logo.svg"} className="w-full h-32 object-cover rounded-t-lg border-b" />
-                      <h4 className="text-lg font-semibold mx-4">{tutorial.name}</h4>
-                      <p className="text-muted-foreground mx-4">{tutorial.description}</p>
-                    </Card>
-                  ))}
-                </div>
-            </Card>
+    const handleResetView = () => {
+        setZoom(1);
+        setPan({ x: 0, y: 0 });
+    };
+    
+    const handleSetPathPoints = (newPathPoints: PathPoint[]) => {
+        if (selectedSplanId === "-1") return;
+        
+        setSplans(prevSplans => {
+            const updatedSplans = [...prevSplans];
+            const splanIndex = getSelectedSplanIndex();
+            updatedSplans[splanIndex] = {
+                ...updatedSplans[splanIndex],
+                pathPoints: newPathPoints
+            };
+            return updatedSplans;
+        });
+    };
 
-            <Card className="w-full p-6 mt-8">
-                <h3 className="text-2xl font-bold text-primary">Releases</h3>
-                <div className="grid grid-cols-2 w-full">
-                  {releases.map((release, index) => (
-                    <Card key={index} className={`p-4 gap-4 hover:shadow-xl hover:ring-primary transition-all cursor-pointer ${index % 2 === 0 ? 'mr-2' : 'ml-2'} ${index >= 2 ? 'mt-4' : ''}`} onClick={() => window.open(release.github_link, '_blank')}>
-                      <h4 className="text-lg font-semibold">{release.product} - {release.version}</h4>
-                      <p className="text-muted-foreground">{release.description}</p>
-                      <p className="text-sm text-muted-foreground">Released on {release.date}</p>
-                    </Card>
-                  ))}
-                </div>
-            </Card>
+    const handleSetActionPoints = (newActionPoints: ActionPoint[]) => {
+        if (selectedSplanId === "-1") return;
 
-            <Card className="w-full p-6 my-8">
-                <h3 className="text-2xl font-bold text-primary">Connect With Us</h3>
-                <div className="flex flex-row space-x-4">
-                  {socialLinks.map((social, index) => (
-                    <Card key={index} className="flex flex-1 flex-row p-4 items-center hover:shadow-xl hover:ring-primary transition-all cursor-pointer" onClick={() => window.open(social.link, '_blank')}>
-                      {social.icon}
-                      <p className="text-muted-foreground">{social.name}</p>
-                    </Card>
-                  ))}
-                </div>
-            </Card>
-        </div>
-    </div>
-  )
-}
+        setSplans(prevSplans => {
+            const updatedSplans = [...prevSplans];
+            const splanIndex = getSelectedSplanIndex();
+            updatedSplans[splanIndex] = {
+                ...updatedSplans[splanIndex],
+                actionPoints: newActionPoints
+            };
+            return updatedSplans;
+        });
+    }
 
-function TypedHeading() {
-  return (
-    <h2 className="font-bold text-4xl tracking-tight">
-      LEGO robot movement,&nbsp;
-      <TypeIt
-        options={{
-          speed: 70,
-          deleteSpeed: 50,
-          waitUntilVisible: true,
-          loop: true,
-        }}
-        getBeforeInit={(instance) =>
-          instance
-            .type("simplified.").pause(1500).delete()
-            .type("made for FLL.").pause(1500).delete()
-            .type("free and open source, always.").pause(1500).delete()
-            .type("crazy easy.").pause(1500).delete()
-            .type("that doesn't suck.").pause(1500).delete()
-            .type("that's repeatable.").pause(1500).delete()
-            .type("built different.").pause(1500).delete()
-            .type("that's precise.").pause(1500).delete()
-            .type("revolutionized.").pause(1500).delete()
-            .type("that's optimized.").pause(1500).delete()
-            .type("with no guesswork.").pause(1500).delete()
+    const getSelectedSplanIndex = () => {
+        return splans.findIndex((splan) => splan.id === selectedSplanId);
+    }
+
+    const deleteSplan = (splanId: string) => {
+        if (splans.length <= 1) {
+            toast.error("Cannot delete the last splan.", { description: "To start fresh, create a new splan and delete the old one." });
+            return;
         }
-      />
-    </h2>
-  );
+
+        const newSplans = splans.filter(splan => splan.id !== splanId);
+        if (selectedSplanId === splanId) {
+            setSelectedSplanId(newSplans.length > 0 ? newSplans[0].id : "-1");
+        }
+        setSplans(newSplans);
+        setTimeout(updateArrows, 10);
+    };
+
+    const createSplan = () => {
+        if (splans.length >= 20) {
+            toast.error("Maximum number of splans reached (20).");
+            return;
+        }
+
+        const newSplan: Splan = {
+            id: (Date.now()).toString(),
+            name: `Splan ${splans.length + 1}`,
+            pathPoints: [], actionPoints: []
+        };
+        setSplans([...splans, newSplan]);
+        setSelectedSplanId(newSplan.id);
+        
+        // Scroll to end when new tab is created
+        setTimeout(() => {
+            if (trackRef.current) {
+                trackRef.current.scrollLeft = trackRef.current.scrollWidth;
+                updateArrows();
+            }
+        }, 10);
+    }
+
+    return (
+        <ResizablePanelGroup orientation="horizontal">
+            <ResizablePanel defaultSize="400px" minSize="300px" maxSize="600px" collapsible>
+                <Tabs defaultValue="points">
+                    <TabsList variant="line" className="w-full">
+                        <TabsTrigger value="points">
+                            <WaypointsIcon /> Splan Info
+                        </TabsTrigger>
+                        <TabsTrigger value="code">
+                            <CodeIcon /> Code
+                        </TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="points">
+                        <Accordion type="multiple" className="px-4">
+                            <AccordionItem value="points">
+                                <AccordionTrigger>Points</AccordionTrigger>
+                                <AccordionContent>
+                                    <ReactSortable 
+                                        tag="ul" id="points-list" list={splans[getSelectedSplanIndex()]?.pathPoints || []}
+                                        setList={handleSetPathPoints} animation={200} handle=".handle"
+                                    >
+                                        {splans[getSelectedSplanIndex()]?.pathPoints.map((point) => (
+                                            <li key={point.id} className="flex flex-row items-center mb-2 last:mb-0">
+                                                <GripVerticalIcon 
+                                                    className="handle mr-2 text-muted-foreground cursor-grab active:cursor-grabbing" 
+                                                />
+                                                <Button variant="outline" size="lg"
+                                                    className="flex flex-1 justify-start hover:text-primary"
+                                                    onClick={() => setSelectedPointId(point.id)}
+                                                    onMouseEnter={() => setHoveredPointId(point.id)}
+                                                    onMouseLeave={() => setHoveredPointId("-1")}
+                                                >
+                                                    <span>{point.name}</span>
+                                                    <span className="ml-1 text-muted-foreground">
+                                                      ({point.x}, {point.y}, {point.heading})
+                                                    </span>
+                                                    <ArrowRightIcon className="ml-auto" />
+                                                </Button>
+                                            </li>
+                                        ))}
+                                    </ReactSortable>
+                                </AccordionContent>
+                            </AccordionItem>
+                            <AccordionItem value="actions">
+                                <AccordionTrigger>Actions</AccordionTrigger>
+                                <AccordionContent>
+                                    <ReactSortable 
+                                        tag="ul" id="actions-list" list={splans[getSelectedSplanIndex()]?.actionPoints || []}
+                                        setList={handleSetActionPoints} animation={200} handle=".handle"
+                                    >
+                                        {splans[getSelectedSplanIndex()]?.actionPoints.map((point) => (
+                                            <li key={point.id} className="flex flex-row items-center mb-2 last:mb-0">
+                                                <GripVerticalIcon 
+                                                    className="handle mr-2 text-muted-foreground cursor-grab active:cursor-grabbing" 
+                                                />
+                                                <Button variant="outline" size="lg" 
+                                                    className="flex flex-1 justify-start hover:text-primary"
+                                                    onClick={() => setSelectedActionId(point.id)}
+                                                    onMouseEnter={() => setHoveredActionId(point.id)} 
+                                                    onMouseLeave={() => setHoveredActionId("-1")}
+                                                >
+                                                    <span>{point.name}</span>
+                                                    <span className="ml-1 text-muted-foreground">{point.t}</span>
+                                                    <ArrowRightIcon className="ml-auto" />
+                                                </Button>
+                                            </li>
+                                        ))}
+                                    </ReactSortable>
+                                </AccordionContent>
+                            </AccordionItem>
+                        </Accordion>
+                    </TabsContent>
+                </Tabs>
+            </ResizablePanel>
+            <ResizableHandle withHandle />
+            <ResizablePanel className="flex flex-col overflow-hidden">
+                <div className="relative flex items-center px-2 py-3 border-b" ref={wrapRef}>
+                    
+                    <div className={`absolute left-0 top-0 bottom-0 w-14 bg-linear-to-r from-background to-transparent pointer-events-none z-10 transition-opacity duration-200 ${showLeft ? 'opacity-100' : 'opacity-0'}`}></div>
+                    <button onClick={scrollLeft} className={`absolute left-0.5 z-20 bg-transparent text-primary w-7 h-7 flex items-center justify-center transition-opacity duration-200 ${showLeft ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
+                        <ChevronLeftIcon size={16} strokeWidth={2.5} />
+                    </button>
+
+                    <div className="flex gap-2.5 overflow-x-auto scroll-smooth flex-1 px-1 scrollbar-hide" ref={trackRef} style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+                        <ReactSortable tag="div" id="splans-list" list={splans} setList={setSplans} animation={200} handle=".handle" className="flex flex-row gap-2.5 items-center">
+                            {splans.map((splan) => (
+                                <div key={splan.id} onClick={() => setSelectedSplanId(splan.id)} className={`flex items-center gap-2 shrink-0 bg-[#1c1c1c] border ${selectedSplanId === splan.id ? 'border-[#e8c547] text-[#e8c547]' : 'border-[#333] text-[#eee]'} rounded-lg px-3 h-9 text-sm font-medium whitespace-nowrap cursor-pointer transition-colors`}>
+                                    <GripVerticalIcon className="handle text-[#666] w-3.5 h-3.5 cursor-grab active:cursor-grabbing" />
+                                    <span>{splan.name}</span>
+                                    <XIcon onClick={(e) => { e.stopPropagation(); deleteSplan(splan.id); }} className="text-[#888] hover:text-white w-3.5 h-3.5 cursor-pointer transition-colors" />
+                                </div>
+                            ))}
+                        </ReactSortable>
+                    </div>
+
+                    <div className={`absolute right-10 top-0 bottom-0 w-14 bg-linear-to-l from-background to-transparent pointer-events-none z-10 transition-opacity duration-200 ${showRight ? 'opacity-100' : 'opacity-0'}`}></div>
+                    <button onClick={scrollRight} className={`absolute right-10.5 z-20 bg-transparent text-primary w-7 h-7 flex items-center justify-center transition-opacity duration-200 ${showRight ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
+                        <ChevronRightIcon size={16} strokeWidth={2.5} />
+                    </button>
+
+                    <button onClick={createSplan} className="relative z-20 shrink-0 w-9 h-9 rounded-lg text-black bg-primary hover:bg-primary/80 flex items-center justify-center ml-2 transition-colors">
+                        <PlusIcon size={18} strokeWidth={2.5} />
+                    </button>
+                </div>
+
+                <div 
+                    ref={fieldContainerRef} onWheel={handleFieldZoom} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove}
+                    onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
+                    className={`flex flex-1 items-center justify-center overflow-hidden relative select-none ${
+                        isDragging ? 'cursor-grabbing' : 'cursor-grab'
+                    }`}
+                >
+                    <img 
+                        src="/unearthedWireframeField.png"
+                        alt="FLL Mat" 
+                        style={{ 
+                            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                            // Disable smooth transition while dragging so movement feels instant/
+                            transition: isDragging ? 'none' : 'transform 75ms ease-out'
+                        }}
+                        className="object-contain max-w-full max-h-full origin-center pointer-events-none" 
+                    />
+                    
+                    {(zoom !== 1 || pan.x !== 0 || pan.y !== 0) && (
+                        <button 
+                            onClick={handleResetView} 
+                            className="absolute bottom-4 right-4 z-10 bg-background/80 hover:bg-background text-xs px-2.5 py-1.5 rounded border shadow transition-colors cursor-pointer"
+                        >
+                            Reset View ({Math.round(zoom * 100)}%)
+                        </button>
+                    )}
+                </div>
+            </ResizablePanel>
+        </ResizablePanelGroup>
+    )
 }

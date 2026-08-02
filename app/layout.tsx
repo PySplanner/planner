@@ -16,12 +16,8 @@ export default function RootLayout({children}: Readonly<{children: React.ReactNo
     <html lang="en" suppressHydrationWarning className={instrumentSans.className}>
       <body>
         <ThemeProvider attribute="class" forcedTheme="dark">
-          <div className="flex flex-col h-screen w-screen bg-background overflow-hidden relative">
-            <MenuBar />
-            <div className="flex-1 flex flex-col w-full overflow-y-auto relative">
-              {children}
-            </div>
-            <Footer className="w-full bg-background z-50 shrink-0" />
+          <div className="flex flex-col h-screen w-screen bg-background overflow-hidden overflow-y-auto relative">
+            {children}
           </div>
           <Toaster richColors position="bottom-right" />
         </ThemeProvider>
